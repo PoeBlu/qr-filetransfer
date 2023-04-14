@@ -76,6 +76,9 @@ def clean_exit():
 
 def FileTransferServerHandlerClass(file_name, auth, debug):
 
+
+
+
     class FileTransferServerHandler(http.server.SimpleHTTPRequestHandler):
         _file_name = file_name
         _auth = auth
@@ -88,11 +91,13 @@ def FileTransferServerHandlerClass(file_name, auth, debug):
             self.end_headers()
 
         def do_GET(self):
-            if self._auth is not None:
-                # The authorization output will contain the prefix Basic, we should add it for comparing.
-                if self.headers.get('Authorization') != 'Basic ' + (self._auth.decode()):
-                    self.do_AUTHHEAD()
-                    return
+            if (
+                self._auth is not None
+                and self.headers.get('Authorization')
+                != f'Basic {self._auth.decode()}'
+            ):
+                self.do_AUTHHEAD()
+                return
 
             # the self.path will start by '/', we truncate it.
             request_path = self.path[1:]
@@ -108,10 +113,14 @@ def FileTransferServerHandlerClass(file_name, auth, debug):
             if self._debug:
                 super().log_message(format, *args)
 
+
     return FileTransferServerHandler
 
 
 def FileUploadServerHandlerClass(output_dir, auth, debug):
+
+
+
 
     class FileUploadServerHandler(http.server.BaseHTTPRequestHandler):
         absolute_path = os.path.abspath(output_dir)
@@ -130,22 +139,24 @@ def FileUploadServerHandlerClass(output_dir, auth, debug):
             self.end_headers()
 
         def do_GET(self):
-            if self._auth is not None:
-                # The authorization output will contain the prefix Basic, we should add it for comparing.
-                if self.headers.get('Authorization') != 'Basic ' + (self._auth.decode()):
-                    self.do_AUTHHEAD()
-                    return
+            if (
+                self._auth is not None
+                and self.headers.get('Authorization')
+                != f'Basic {self._auth.decode()}'
+            ):
+                self.do_AUTHHEAD()
+                return
 
-            f = self.send_head()
-            if f:
+            if f := self.send_head():
                 self.copyfile(f, self.wfile)
                 f.close()
 
 
+
         def do_HEAD(self):
-            f = self.send_head()
-            if f:
+            if f := self.send_head():
                 f.close()
+
 
 
         def do_POST(self):
@@ -235,9 +246,9 @@ def FileUploadServerHandlerClass(output_dir, auth, debug):
                             remainbytes -= len(line)
                             if boundary in line:
                                 # Meets boundary, this file finished. We remove \r\n because of \r\n is introduced by protocol
-                                preline = preline[0:-1]
+                                preline = preline[:-1]
                                 if preline.endswith(b'\r'):
-                                    preline = preline[0:-1]
+                                    preline = preline[:-1]
                                 out.write(preline)
                                 uploaded_files.append(os.path.join(self.nice_path, file_name))
                                 break
@@ -245,7 +256,8 @@ def FileUploadServerHandlerClass(output_dir, auth, debug):
                                 # If not boundary, write it to output file directly.
                                 out.write(preline)
                                 preline = line
-            return (True, "File '%s' upload success!" % ",".join(uploaded_files))
+            return True, f"""File '{",".join(uploaded_files)}' upload success!"""
+
 
 
         def send_head(self):
@@ -278,29 +290,40 @@ def FileUploadServerHandlerClass(output_dir, auth, debug):
         def copyfile(self, source, outputfile):
             shutil.copyfileobj(source, outputfile)
 
+
     return FileUploadServerHandler
 
 
 def get_ssid():
 
     if operating_system == MacOS:
-        ssid = os.popen("/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I | awk '/ SSID/ {print substr($0, index($0, $2))}'").read().strip()
-        return ssid
-
+        return (
+            os.popen(
+                "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport -I | awk '/ SSID/ {print substr($0, index($0, $2))}'"
+            )
+            .read()
+            .strip()
+        )
     elif operating_system == "Linux":
-        ssid = os.popen("iwgetid -r 2>/dev/null",).read().strip()
-        if not ssid:
-            ssid = os.popen("nmcli -t -f active,ssid dev wifi | egrep '^yes' | cut -d\\' -f2 | sed 's/yes://g' 2>/dev/null").read().strip()
-        return ssid
-
+        return (
+            os.popen(
+                "iwgetid -r 2>/dev/null",
+            )
+            .read()
+            .strip()
+            or os.popen(
+                "nmcli -t -f active,ssid dev wifi | egrep '^yes' | cut -d\\' -f2 | sed 's/yes://g' 2>/dev/null"
+            )
+            .read()
+            .strip()
+        )
     else:
         # List interface information and extract the SSID from Profile
         # note that if WiFi is not connected, Profile line will not be found and nothing will be returned.
         interface_info = os.popen("netsh wlan show interfaces").read()
         for line in interface_info.splitlines():
             if line.strip().startswith("Profile"):
-                ssid = line.split(':')[1].strip()
-                return ssid
+                return line.split(':')[1].strip()
 
 
 def get_local_ip():
@@ -357,16 +380,8 @@ def start_download_server(file_path, debug, custom_port, ip_addr, auth):
     auth             -- String indicating base64 encoded username:password
     """
 
-    if custom_port:
-        PORT = int(custom_port)
-    else:
-        PORT = random_port()
-
-    if ip_addr:
-        LOCAL_IP = ip_addr
-    else:
-        LOCAL_IP = get_local_ip()
-
+    PORT = int(custom_port) if custom_port else random_port()
+    LOCAL_IP = ip_addr if ip_addr else get_local_ip()
     SSID = get_ssid()
 
     if not os.path.exists(file_path):
@@ -402,9 +417,11 @@ def start_download_server(file_path, debug, custom_port, ip_addr, auth):
     httpd = socketserver.TCPServer(("", PORT), handler)
 
     # This is the url to be encoded into the QR code
-    address = "http://" + str(LOCAL_IP) + ":" + str(PORT) + "/" + file_path
+    address = f"http://{str(LOCAL_IP)}:{str(PORT)}/{file_path}"
 
-    print("Scan the following QR code to start downloading.\nMake sure that your smartphone is connected to \033[1;94m{}\033[0m".format(SSID))
+    print(
+        f"Scan the following QR code to start downloading.\nMake sure that your smartphone is connected to \033[1;94m{SSID}\033[0m"
+    )
 
     # There are many times where I just need to visit the url
     # and cant bother scaning the QR code everytime when debugging
@@ -436,16 +453,8 @@ def start_upload_server(file_path, debug, custom_port, ip_addr, auth):
     auth             -- String indicating base64 encoded username:password
     """
 
-    if custom_port:
-        PORT = int(custom_port)
-    else:
-        PORT = random_port()
-
-    if ip_addr:
-        LOCAL_IP = ip_addr
-    else:
-        LOCAL_IP = get_local_ip()
-
+    PORT = int(custom_port) if custom_port else random_port()
+    LOCAL_IP = ip_addr if ip_addr else get_local_ip()
     SSID = get_ssid()
 
     if not os.path.exists(file_path):
@@ -453,7 +462,7 @@ def start_upload_server(file_path, debug, custom_port, ip_addr, auth):
         return
 
     if not os.path.isdir(file_path):
-        print("%s is not a folder." % file_path)
+        print(f"{file_path} is not a folder.")
         return
 
     handler = FileUploadServerHandlerClass(file_path, auth, debug)
@@ -465,9 +474,11 @@ def start_upload_server(file_path, debug, custom_port, ip_addr, auth):
         clean_exit()
 
     # This is the url to be encoded into the QR code
-    address = "http://" + str(LOCAL_IP) + ":" + str(PORT) + "/"
+    address = f"http://{str(LOCAL_IP)}:{str(PORT)}/"
 
-    print("Scan the following QR code to start uploading.\nMake sure that your smartphone is connected to \033[1;94m{}\033[0m".format(SSID))
+    print(
+        f"Scan the following QR code to start uploading.\nMake sure that your smartphone is connected to \033[1;94m{SSID}\033[0m"
+    )
 
     # There are many times where I just need to visit the url
     # and cant bother scaning the QR code everytime when debugging
